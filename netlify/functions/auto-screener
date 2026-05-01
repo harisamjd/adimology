@@ -1,0 +1,77 @@
+import type { Config } from "@netlify/functions";
+
+// ============================================================
+// AUTO SCREENER - Jalankan screener otomatis setiap hari kerja
+// Jam 08:00 WIB (01:00 UTC) sebelum pasar buka
+// Hasilnya tersimpan ke Supabase dan siap saat pasar buka
+// ============================================================
+
+function isWeekday(): boolean {
+  const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return wibNow.getUTCDay() >= 1 && wibNow.getUTCDay() <= 5;
+}
+
+export default async function handler(): Promise<void> {
+  if (!isWeekday()) {
+    console.log("Weekend, skip auto screener");
+    return;
+  }
+
+  const appUrl = process.env.URL || process.env.NEXT_PUBLIC_APP_URL || "";
+  const cronSecret = process.env.CRON_SECRET || "";
+
+  console.log("Running auto screener...");
+
+  const modes = ["combo", "bandar", "oversold", "volume_spike", "breakout", "bsjp"];
+
+  // Default params per mode
+  const modeParams: Record<string, object> = {
+    combo: {
+      weights: { bandar: 35, oversold: 25, volume: 20, breakout: 20 },
+      filters: { bandarDays: 3, rsiMax: 35, volumeMultiplier: 2.0, breakoutConfirmVol: 1.5 },
+      limit: 30,
+    },
+    bandar: { filters: { bandarDays: 3, bandarNetBuyMin: 0 }, limit: 20 },
+    oversold: { filters: { rsiMax: 35, rsiPeriod: 14 }, limit: 20 },
+    volume_spike: { filters: { volumeMultiplier: 2.0, volumeMaPeriod: 20 }, limit: 20 },
+    breakout: { filters: { breakoutConfirmVol: 1.5 }, limit: 20 },
+    bsjp: { filters: { bandarDays: 2, bsjpMinScore: 50, volumeMultiplier: 1.5 }, limit: 15 },
+  };
+
+  const results: Record<string, unknown> = {};
+
+  for (const mode of modes) {
+    try {
+      const res = await fetch(`${appUrl}/api/screener/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-cron-secret": cronSecret,
+        },
+        body: JSON.stringify({ mode, ...modeParams[mode] }),
+      });
+
+      const data = await res.json();
+      results[mode] = {
+        success: res.ok,
+        total: data.total || 0,
+        error: data.error,
+      };
+
+      console.log(`Mode ${mode}: ${data.total || 0} results`);
+
+      // Delay antar mode untuk hindari rate limit
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err) {
+      console.error(`Auto screener failed for mode ${mode}:`, err);
+      results[mode] = { success: false, error: String(err) };
+    }
+  }
+
+  console.log("Auto screener complete:", JSON.stringify(results));
+}
+
+// Setiap hari kerja jam 08:00 WIB = 01:00 UTC
+export const config: Config = {
+  schedule: "0 1 * * 1-5",
+};
