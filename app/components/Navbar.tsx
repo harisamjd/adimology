@@ -8,7 +8,7 @@ import JobStatusIndicator from './JobStatusIndicator';
 import StockbitFetchingIndicator from './StockbitFetchingIndicator';
 import ThemeToggle from './ThemeToggle';
 import PasswordSettingModal from './PasswordSettingModal';
-import { Github, Menu, X, Shield } from 'lucide-react';
+import { Github, Menu, X, Shield, ScanSearch } from 'lucide-react';
 
 const Navbar = () => {
   const pathname = usePathname();
