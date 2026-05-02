@@ -1,587 +1,229 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import {
-  Search, SlidersHorizontal, Zap, TrendingUp, BarChart2,
-  ArrowUpRight, Copy, Check, RefreshCw, ChevronDown,
-  ChevronUp, Target, Shield, Clock, Star, Activity,
-  MessageCircle
-} from "lucide-react";
+import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, Target, Activity, BarChart2, Clock, Award, AlertTriangle } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 
-// ============================================================
-// TYPES
-// ============================================================
-interface TradingPlan {
-  entryLow: number;
-  entryHigh: number;
-  tp1: number;
-  tp2: number;
-  cutLoss: number;
-  rrRatio: number;
-}
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
-interface ScreenerResult {
-  ticker: string;
-  name: string;
-  sector: string;
-  lastPrice: number;
-  change: number;
-  changePercent: number;
-  score: number;
-  signals: string[];
-  avgBandar: number;
-  rsi: number;
-  volumeMultiplier: number;
-  priority: "HIGH" | "MEDIUM" | "LOW";
-  tradingPlan: TradingPlan;
-  screenerMode: string;
-  signalDetails?: Record<string, unknown>;
-}
+interface SignalAccuracy { screener_mode: string; total_signals: number; tracked_d5: number; hit_rate_tp1: number; hit_rate_tp2: number; cutloss_rate: number; avg_return_d1: number; avg_return_d3: number; avg_return_d5: number; }
+interface TickerAccuracy { ticker: string; screener_mode: string; appearances: number; hit_rate_tp1: number; avg_score: number; avg_return_d5: number; last_appeared: string; }
 
-interface ScreenerConfig {
-  mode: "combo" | "bandar" | "oversold" | "volume_spike" | "breakout" | "bsjp";
-  weights: { bandar: number; oversold: number; volume: number; breakout: number };
-  filters: {
-    bandarDays: number;
-    rsiMax: number;
-    volumeMultiplier: number;
-    breakoutConfirmVol: number;
-    bsjpMinScore: number;
-  };
-  limit: number;
-}
-
-// ============================================================
-// MOCK DATA untuk preview sebelum API tersambung
-// ============================================================
-const MOCK_RESULTS: ScreenerResult[] = [
-  {
-    ticker: "BBRI", name: "Bank Rakyat Indonesia Tbk", sector: "Financials",
-    lastPrice: 4280, change: 60, changePercent: 1.42, score: 84,
-    signals: ["Akumulasi 4h berturut", "Net Buy ✓", "Volume 2.8×", "RSI 31"],
-    avgBandar: 4150, rsi: 31, volumeMultiplier: 2.8, priority: "HIGH",
-    tradingPlan: { entryLow: 4200, entryHigh: 4320, tp1: 4773, tp2: 5395, cutLoss: 3990, rrRatio: 2.4 },
-    screenerMode: "combo",
-    signalDetails: {}
-  },
-  {
-    ticker: "TLKM", name: "Telekomunikasi Indonesia Tbk", sector: "Telco",
-    lastPrice: 3200, change: -40, changePercent: -1.23, score: 71,
-    signals: ["Akumulasi 3h berturut", "RSI 28 (Oversold)", "Dekat MA20"],
-    avgBandar: 3100, rsi: 28, volumeMultiplier: 1.9, priority: "HIGH",
-    tradingPlan: { entryLow: 3050, entryHigh: 3200, tp1: 3565, tp2: 4030, cutLoss: 2898, rrRatio: 1.9 },
-    screenerMode: "combo",
-    signalDetails: {}
-  },
-  {
-    ticker: "ASII", name: "Astra International Tbk", sector: "Industrials",
-    lastPrice: 5200, change: 75, changePercent: 1.46, score: 67,
-    signals: ["Breakout R 5150", "Volume Konfirmasi ✓", "Net Buy ✓"],
-    avgBandar: 4980, rsi: 48, volumeMultiplier: 3.1, priority: "MEDIUM",
-    tradingPlan: { entryLow: 5100, entryHigh: 5250, tp1: 5727, tp2: 6474, cutLoss: 4845, rrRatio: 2.1 },
-    screenerMode: "combo",
-    signalDetails: {}
-  },
-  {
-    ticker: "UNVR", name: "Unilever Indonesia Tbk", sector: "Consumer",
-    lastPrice: 2640, change: 20, changePercent: 0.76, score: 58,
-    signals: ["Volume 2.1×", "Akumulasi 2h"],
-    avgBandar: 2590, rsi: 42, volumeMultiplier: 2.1, priority: "MEDIUM",
-    tradingPlan: { entryLow: 2580, entryHigh: 2680, tp1: 2979, tp2: 3367, cutLoss: 2451, rrRatio: 1.7 },
-    screenerMode: "combo",
-    signalDetails: {}
-  },
-  {
-    ticker: "BMRI", name: "Bank Mandiri Tbk", sector: "Financials",
-    lastPrice: 5825, change: -25, changePercent: -0.43, score: 52,
-    signals: ["RSI 33", "Mendekati R (2.1% lagi)"],
-    avgBandar: 5700, rsi: 33, volumeMultiplier: 1.4, priority: "MEDIUM",
-    tradingPlan: { entryLow: 5700, entryHigh: 5850, tp1: 6555, tp2: 7410, cutLoss: 5415, rrRatio: 1.6 },
-    screenerMode: "combo",
-    signalDetails: {}
-  },
+const MOCK_ACC: SignalAccuracy[] = [
+  { screener_mode: "combo", total_signals: 124, tracked_d5: 89, hit_rate_tp1: 68.5, hit_rate_tp2: 42.1, cutloss_rate: 18.0, avg_return_d1: 1.2, avg_return_d3: 2.8, avg_return_d5: 3.9 },
+  { screener_mode: "bandar", total_signals: 87, tracked_d5: 65, hit_rate_tp1: 74.2, hit_rate_tp2: 51.3, cutloss_rate: 14.5, avg_return_d1: 1.8, avg_return_d3: 3.5, avg_return_d5: 4.8 },
+  { screener_mode: "oversold", total_signals: 56, tracked_d5: 44, hit_rate_tp1: 63.8, hit_rate_tp2: 38.6, cutloss_rate: 22.7, avg_return_d1: 0.9, avg_return_d3: 2.1, avg_return_d5: 3.1 },
+  { screener_mode: "volume_spike", total_signals: 73, tracked_d5: 58, hit_rate_tp1: 59.2, hit_rate_tp2: 35.4, cutloss_rate: 25.1, avg_return_d1: 2.4, avg_return_d3: 3.2, avg_return_d5: 2.8 },
+  { screener_mode: "breakout", total_signals: 48, tracked_d5: 38, hit_rate_tp1: 71.1, hit_rate_tp2: 47.4, cutloss_rate: 15.8, avg_return_d1: 2.1, avg_return_d3: 4.1, avg_return_d5: 5.3 },
+  { screener_mode: "bsjp", total_signals: 31, tracked_d5: 24, hit_rate_tp1: 66.7, hit_rate_tp2: 45.8, cutloss_rate: 16.7, avg_return_d1: 1.5, avg_return_d3: 2.9, avg_return_d5: 3.6 },
 ];
 
-const BSJP_MOCK: ScreenerResult[] = [
-  {
-    ticker: "GOTO", name: "GoTo Gojek Tokopedia Tbk", sector: "Technology",
-    lastPrice: 71, change: 1, changePercent: 1.43, score: 78,
-    signals: ["Bandar Aktif", "Entry Fresh", "Net Buy+"],
-    avgBandar: 68, rsi: 38, volumeMultiplier: 1.8, priority: "HIGH",
-    tradingPlan: { entryLow: 68, entryHigh: 72, tp1: 78, tp2: 88, cutLoss: 65, rrRatio: 2.2 },
-    screenerMode: "bsjp",
-    signalDetails: {}
-  },
-  {
-    ticker: "DMMX", name: "Digital Mediatama Maxima Tbk", sector: "Media",
-    lastPrice: 124, change: 3, changePercent: 2.48, score: 65,
-    signals: ["Bandar Aktif", "Volume Warming Up"],
-    avgBandar: 118, rsi: 41, volumeMultiplier: 1.6, priority: "MEDIUM",
-    tradingPlan: { entryLow: 118, entryHigh: 126, tp1: 136, tp2: 153, cutLoss: 112, rrRatio: 1.9 },
-    screenerMode: "bsjp",
-    signalDetails: {}
-  },
+const MOCK_TICKERS: TickerAccuracy[] = [
+  { ticker: "BBRI", screener_mode: "bandar", appearances: 12, hit_rate_tp1: 91.7, avg_score: 78, avg_return_d5: 5.2, last_appeared: "2025-04-23" },
+  { ticker: "ASII", screener_mode: "breakout", appearances: 8, hit_rate_tp1: 87.5, avg_score: 74, avg_return_d5: 6.1, last_appeared: "2025-04-22" },
+  { ticker: "TLKM", screener_mode: "oversold", appearances: 10, hit_rate_tp1: 80.0, avg_score: 69, avg_return_d5: 4.3, last_appeared: "2025-04-21" },
+  { ticker: "BMRI", screener_mode: "combo", appearances: 7, hit_rate_tp1: 71.4, avg_score: 72, avg_return_d5: 4.8, last_appeared: "2025-04-20" },
+  { ticker: "UNVR", screener_mode: "bandar", appearances: 9, hit_rate_tp1: 66.7, avg_score: 65, avg_return_d5: 3.9, last_appeared: "2025-04-19" },
 ];
 
-// ============================================================
-// COMPONENTS
-// ============================================================
+const MODE_LABEL: Record<string, string> = { combo: "Combo Score", bandar: "Akumulasi Bandar", oversold: "Oversold/Bounce", volume_spike: "Volume Spike", breakout: "Breakout", bsjp: "BSJP" };
+const MODE_COLOR: Record<string, string> = { combo: "#667eea", bandar: "#38ef7d", oversold: "#f5a623", volume_spike: "#3b82f6", breakout: "#8b5cf6", bsjp: "#f97316" };
 
-const SIGNAL_MODE_OPTIONS = [
-  { id: "combo", label: "Combo Score", icon: <Zap size={16} />, desc: "Semua sinyal digabung" },
-  { id: "bandar", label: "Akumulasi Bandar", icon: <Star size={16} />, desc: "Net buy + avg bandar naik" },
-  { id: "oversold", label: "Oversold/Bounce", icon: <TrendingUp size={16} />, desc: "RSI rendah + dekat support" },
-  { id: "volume_spike", label: "Volume Spike", icon: <BarChart2 size={16} />, desc: "Volume anomali" },
-  { id: "breakout", label: "Breakout", icon: <ArrowUpRight size={16} />, desc: "Tembus resistance" },
-  { id: "bsjp", label: "BSJP", icon: <Clock size={16} />, desc: "Beli Sore Jual Pagi" },
-];
-
-function PriorityBadge({ priority }: { priority: string }) {
-  const map: Record<string, string> = {
-    HIGH: "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
-    MEDIUM: "bg-amber-500/20 text-amber-400 border border-amber-500/30",
-    LOW: "bg-slate-500/20 text-slate-400 border border-slate-500/30",
-  };
+function HitGauge({ value }: { value: number }) {
+  const color = value >= 70 ? "#38ef7d" : value >= 55 ? "#f5a623" : "#f5576c";
+  const r = 28, circ = 2 * Math.PI * r, prog = (value / 100) * circ;
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${map[priority] || map.LOW}`}>
-      {priority}
-    </span>
-  );
-}
-
-function ScoreBar({ score }: { score: number }) {
-  const color = score >= 70 ? "#10b981" : score >= 50 ? "#f59e0b" : "#64748b";
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700"
-          style={{ width: `${score}%`, backgroundColor: color }}
-        />
+    <div style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width={72} height={72} viewBox="0 0 72 72">
+        <circle cx={36} cy={36} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={7} />
+        <circle cx={36} cy={36} r={r} fill="none" stroke={color} strokeWidth={7}
+          strokeDasharray={`${prog} ${circ - prog}`} strokeLinecap="round"
+          transform="rotate(-90 36 36)" style={{ transition: "stroke-dasharray 1s" }} />
+      </svg>
+      <div style={{ position: "absolute", textAlign: "center" }}>
+        <div style={{ fontSize: "13px", fontWeight: 700, color, fontFamily: "monospace" }}>{value?.toFixed(0)}%</div>
       </div>
-      <span className="text-sm font-bold tabular-nums" style={{ color }}>{score}</span>
     </div>
   );
 }
 
-function TradingPlanCard({ result, onCopy }: { result: ScreenerResult; onCopy: (text: string) => void }) {
-  const [copied, setCopied] = useState(false);
-  const plan = result.tradingPlan;
-  const upside1 = ((plan.tp1 - result.lastPrice) / result.lastPrice * 100).toFixed(1);
-  const upside2 = ((plan.tp2 - result.lastPrice) / result.lastPrice * 100).toFixed(1);
-  const downside = ((plan.cutLoss - result.lastPrice) / result.lastPrice * 100).toFixed(1);
-
-  const formatNum = (n: number) => n?.toLocaleString("id-ID") || "-";
-
-  const waText = `📊 *${result.ticker}* — Skor ${result.score}/100 ${result.priority === "HIGH" ? "🔥" : result.priority === "MEDIUM" ? "⚡" : ""}
-━━━━━━━━━━━━━━━━━
-Sinyal    : ${result.signals.slice(0, 2).join(", ")}
-Entry     : ${formatNum(plan.entryLow)} – ${formatNum(plan.entryHigh)}
-TP1       : ${formatNum(plan.tp1)} (+${upside1}%)
-TP2       : ${formatNum(plan.tp2)} (+${upside2}%)
-Cut Loss  : ${formatNum(plan.cutLoss)} (${downside}%)
-R/R Ratio : 1:${plan.rrRatio}
-Avg Bandar: ${formatNum(result.avgBandar)}
-RSI       : ${result.rsi?.toFixed(0) || "-"}
-Vol       : ${result.volumeMultiplier}×
-Sektor    : ${result.sector}`;
-
-  function handleCopy() {
-    onCopy(waText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+function AccCard({ data }: { data: SignalAccuracy }) {
+  const color = MODE_COLOR[data.screener_mode] || "#667eea";
+  const label = MODE_LABEL[data.screener_mode] || data.screener_mode;
+  const cardStyle = { background: "var(--glass-frost), var(--glass-bg)", backdropFilter: "blur(20px)", border: "1px solid var(--glass-border)", borderRadius: "16px", padding: "20px", transition: "border-color 0.2s" };
 
   return (
-    <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl overflow-hidden hover:border-slate-600/70 transition-all">
-      {/* Header */}
-      <div className="flex items-start justify-between p-4 pb-3">
+    <div style={cardStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
         <div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono font-bold text-white text-lg">{result.ticker}</span>
-            <PriorityBadge priority={result.priority} />
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: color }} />
+            <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "14px" }}>{label}</span>
           </div>
-          <p className="text-slate-400 text-xs mt-0.5 truncate max-w-[200px]">{result.name}</p>
+          <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "3px 0 0" }}>{data.total_signals} sinyal · {data.tracked_d5} tertrack</p>
         </div>
-        <div className="text-right">
-          <div className="text-white font-semibold tabular-nums">{formatNum(result.lastPrice)}</div>
-          <div className={`text-xs tabular-nums ${result.changePercent >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-            {result.changePercent >= 0 ? "+" : ""}{result.changePercent?.toFixed(2)}%
-          </div>
-        </div>
+        <HitGauge value={data.hit_rate_tp1 || 0} />
       </div>
 
-      {/* Score */}
-      <div className="px-4 pb-3">
-        <ScoreBar score={result.score} />
-      </div>
-
-      {/* Signals */}
-      <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-        {result.signals.map((s, i) => (
-          <span key={i} className="text-xs bg-indigo-500/15 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded-md">
-            {s}
-          </span>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginBottom: "14px" }}>
+        {[
+          { label: "Hit TP1", value: `${data.hit_rate_tp1?.toFixed(0) || 0}%`, color: "#38ef7d" },
+          { label: "Hit TP2", value: `${data.hit_rate_tp2?.toFixed(0) || 0}%`, color: "#667eea" },
+          { label: "Cut Loss", value: `${data.cutloss_rate?.toFixed(0) || 0}%`, color: "#f5576c" },
+        ].map((m, i) => (
+          <div key={i} style={{ background: "rgba(0,0,0,0.2)", borderRadius: "8px", padding: "8px", textAlign: "center" }}>
+            <div style={{ fontSize: "10px", color: m.color, marginBottom: "2px" }}>{m.label}</div>
+            <div style={{ fontWeight: 700, fontSize: "14px", color: m.color, fontFamily: "monospace" }}>{m.value}</div>
+          </div>
         ))}
       </div>
 
-      {/* Trading Plan Grid */}
-      <div className="mx-4 mb-3 bg-slate-900/50 rounded-lg p-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <div>
-          <div className="text-slate-500 text-xs flex items-center gap-1"><Target size={10}/> Entry Zone</div>
-          <div className="text-slate-200 font-mono font-medium">{formatNum(plan.entryLow)}–{formatNum(plan.entryHigh)}</div>
-        </div>
-        <div>
-          <div className="text-slate-500 text-xs flex items-center gap-1"><Shield size={10}/> Cut Loss</div>
-          <div className="text-red-400 font-mono font-medium">{formatNum(plan.cutLoss)} <span className="text-xs text-red-500/80">({downside}%)</span></div>
-        </div>
-        <div>
-          <div className="text-slate-500 text-xs">TP1 (R1)</div>
-          <div className="text-emerald-400 font-mono font-medium">{formatNum(plan.tp1)} <span className="text-xs text-emerald-500/80">(+{upside1}%)</span></div>
-        </div>
-        <div>
-          <div className="text-slate-500 text-xs">TP2 (Max)</div>
-          <div className="text-emerald-300 font-mono font-medium">{formatNum(plan.tp2)} <span className="text-xs text-emerald-400/80">(+{upside2}%)</span></div>
-        </div>
-        <div className="col-span-2 pt-1 border-t border-slate-700/50 flex justify-between">
-          <div>
-            <span className="text-slate-500 text-xs">Avg Bandar: </span>
-            <span className="text-slate-300 font-mono text-xs font-medium">{formatNum(result.avgBandar)}</span>
+      <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>Avg Return</div>
+      {[{ label: "D+1", value: data.avg_return_d1 }, { label: "D+3", value: data.avg_return_d3 }, { label: "D+5", value: data.avg_return_d5 }].map((r, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)", width: "24px" }}>{r.label}</span>
+          <div style={{ flex: 1, height: "4px", borderRadius: "4px", background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: "4px", width: `${Math.min(Math.abs(r.value || 0) * 10, 100)}%`, background: (r.value || 0) >= 0 ? "#38ef7d" : "#f5576c", transition: "width 0.7s" }} />
           </div>
-          <div>
-            <span className="text-slate-500 text-xs">RSI: </span>
-            <span className={`font-mono text-xs font-medium ${result.rsi < 30 ? "text-amber-400" : result.rsi > 70 ? "text-red-400" : "text-slate-300"}`}>
-              {result.rsi?.toFixed(0) || "-"}
-            </span>
-            <span className="text-slate-500 text-xs ml-3">R/R: </span>
-            <span className="text-indigo-400 font-mono text-xs font-medium">1:{plan.rrRatio}</span>
-          </div>
+          <span style={{ fontSize: "11px", fontFamily: "monospace", fontWeight: 600, width: "44px", textAlign: "right", color: (r.value || 0) >= 0 ? "#38ef7d" : "#f5576c" }}>
+            {(r.value || 0) >= 0 ? "+" : ""}{r.value?.toFixed(1) || "0.0"}%
+          </span>
         </div>
-      </div>
-
-      {/* Copy Button */}
-      <div className="px-4 pb-4">
-        <button
-          onClick={handleCopy}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 hover:border-slate-500 text-slate-300 hover:text-white text-sm transition-all"
-        >
-          {copied ? <Check size={14} className="text-emerald-400" /> : <MessageCircle size={14} />}
-          {copied ? "Copied!" : "Copy WA/Telegram"}
-        </button>
-      </div>
+      ))}
     </div>
   );
 }
 
-function ParameterPanel({
-  config, onChange
-}: {
-  config: ScreenerConfig;
-  onChange: (c: ScreenerConfig) => void;
-}) {
-  const update = (key: string, val: number) => {
-    onChange({
-      ...config,
-      filters: { ...config.filters, [key]: val },
-    });
-  };
+export default function SignalAccuracyPage() {
+  const [accuracy, setAccuracy] = useState<SignalAccuracy[]>(MOCK_ACC);
+  const [tickers, setTickers] = useState<TickerAccuracy[]>(MOCK_TICKERS);
+  const [usingMock, setUsingMock] = useState(true);
+  const [selectedMode, setSelectedMode] = useState("all");
 
-  const sliders = config.mode === "combo" ? [
-    { key: "bandar", label: "Bobot Bandar", min: 0, max: 100, value: config.weights.bandar,
-      onChange: (v: number) => onChange({ ...config, weights: { ...config.weights, bandar: v } }) },
-    { key: "oversold", label: "Bobot Oversold", min: 0, max: 100, value: config.weights.oversold,
-      onChange: (v: number) => onChange({ ...config, weights: { ...config.weights, oversold: v } }) },
-    { key: "volume", label: "Bobot Volume", min: 0, max: 100, value: config.weights.volume,
-      onChange: (v: number) => onChange({ ...config, weights: { ...config.weights, volume: v } }) },
-    { key: "breakout", label: "Bobot Breakout", min: 0, max: 100, value: config.weights.breakout,
-      onChange: (v: number) => onChange({ ...config, weights: { ...config.weights, breakout: v } }) },
-  ] : [];
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, t] = await Promise.all([supabase.from("v_signal_accuracy").select("*"), supabase.from("v_ticker_accuracy").select("*").limit(20)]);
+        if (a.data?.length) { setAccuracy(a.data as SignalAccuracy[]); setUsingMock(false); }
+        if (t.data?.length) setTickers(t.data as TickerAccuracy[]);
+      } catch {}
+    })();
+  }, []);
 
-  const filters = [
-    ...(["bandar", "combo"].includes(config.mode) ? [
-      { key: "bandarDays", label: "Min Hari Akumulasi", min: 1, max: 10, value: config.filters.bandarDays, step: 1 },
-    ] : []),
-    ...(["oversold", "combo"].includes(config.mode) ? [
-      { key: "rsiMax", label: "RSI Maks (Oversold)", min: 20, max: 50, value: config.filters.rsiMax, step: 1 },
-    ] : []),
-    ...(["volume_spike", "combo"].includes(config.mode) ? [
-      { key: "volumeMultiplier", label: "Min Volume Multiplier", min: 1, max: 5, value: config.filters.volumeMultiplier, step: 0.1 },
-    ] : []),
-    ...(["breakout", "combo"].includes(config.mode) ? [
-      { key: "breakoutConfirmVol", label: "Min Vol Konfirmasi Breakout", min: 1, max: 3, value: config.filters.breakoutConfirmVol, step: 0.1 },
-    ] : []),
-    ...(config.mode === "bsjp" ? [
-      { key: "bsjpMinScore", label: "Min Skor BSJP", min: 30, max: 80, value: config.filters.bsjpMinScore, step: 5 },
-    ] : []),
-  ];
+  const filtered = selectedMode === "all" ? accuracy : accuracy.filter(a => a.screener_mode === selectedMode);
+  const bestMode = accuracy.reduce((b, c) => (c.hit_rate_tp1 || 0) > (b.hit_rate_tp1 || 0) ? c : b, accuracy[0]);
+  const overallHit = accuracy.length ? accuracy.reduce((s, a) => s + (a.hit_rate_tp1 || 0), 0) / accuracy.length : 0;
+  const overallRet = accuracy.length ? accuracy.reduce((s, a) => s + (a.avg_return_d5 || 0), 0) / accuracy.length : 0;
+
+  const cardStyle = { background: "var(--glass-frost), var(--glass-bg)", backdropFilter: "blur(20px)", border: "1px solid var(--glass-border)", borderRadius: "12px", padding: "16px" };
+  const thStyle: React.CSSProperties = { padding: "10px 12px", textAlign: "left", fontSize: "10px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid var(--border-color)", whiteSpace: "nowrap" };
 
   return (
-    <div className="space-y-4">
-      {sliders.length > 0 && (
-        <div>
-          <p className="text-xs text-slate-500 uppercase tracking-wider mb-3 font-semibold">Bobot Sinyal (%)</p>
-          {sliders.map(s => (
-            <div key={s.key} className="mb-3">
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">{s.label}</span>
-                <span className="text-slate-200 font-mono font-medium">{s.value}%</span>
-              </div>
-              <input type="range" min={s.min} max={s.max} value={s.value}
-                className="w-full accent-indigo-500 h-1.5"
-                onChange={e => s.onChange(Number(e.target.value))} />
-            </div>
-          ))}
-        </div>
-      )}
-      {filters.length > 0 && (
-        <div>
-          <p className="text-xs text-slate-500 uppercase tracking-wider mb-3 font-semibold">Filter Parameter</p>
-          {filters.map(f => (
-            <div key={f.key} className="mb-3">
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">{f.label}</span>
-                <span className="text-slate-200 font-mono font-medium">{f.value}</span>
-              </div>
-              <input type="range" min={f.min} max={f.max} step={f.step ?? 1} value={f.value}
-                className="w-full accent-indigo-500 h-1.5"
-                onChange={e => update(f.key, Number(e.target.value))} />
-            </div>
-          ))}
-        </div>
-      )}
-      <div>
-        <p className="text-xs text-slate-500 uppercase tracking-wider mb-2 font-semibold">Jumlah Hasil</p>
-        <select
-          value={config.limit}
-          onChange={e => onChange({ ...config, limit: Number(e.target.value) })}
-          className="w-full bg-slate-700/50 border border-slate-600/50 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-indigo-500"
-        >
-          {[10, 20, 30, 50].map(n => <option key={n} value={n}>{n} saham</option>)}
-        </select>
-      </div>
-    </div>
-  );
-}
+    <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto" }}>
 
-// ============================================================
-// MAIN PAGE
-// ============================================================
-export default function ScreenerPage() {
-  const [config, setConfig] = useState<ScreenerConfig>({
-    mode: "combo",
-    weights: { bandar: 35, oversold: 25, volume: 20, breakout: 20 },
-    filters: { bandarDays: 3, rsiMax: 35, volumeMultiplier: 2.0, breakoutConfirmVol: 1.5, bsjpMinScore: 50 },
-    limit: 20,
-  });
-
-  const [results, setResults] = useState<ScreenerResult[]>(MOCK_RESULTS);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showParams, setShowParams] = useState(false);
-  const [searchTicker, setSearchTicker] = useState("");
-  const [sortBy, setSortBy] = useState<"score" | "changePercent" | "volumeMultiplier">("score");
-  const [copiedAll, setCopiedAll] = useState(false);
-  const [lastRun, setLastRun] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Demo: Saat mode BSJP dipilih tampilkan mock BSJP
-  const activeResults = results.filter(r =>
-    searchTicker ? r.ticker.includes(searchTicker.toUpperCase()) : true
-  ).sort((a, b) => {
-    if (sortBy === "score") return b.score - a.score;
-    if (sortBy === "changePercent") return b.changePercent - a.changePercent;
-    if (sortBy === "volumeMultiplier") return b.volumeMultiplier - a.volumeMultiplier;
-    return 0;
-  });
-
-  const runScreener = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMsg(null);
-    try {
-      const res = await fetch("/api/screener/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Screener gagal");
-      setResults(data.results || []);
-      setLastRun(new Date().toLocaleTimeString("id-ID"));
-    } catch (err) {
-      console.error(err);
-      setErrorMsg(String(err));
-      // Pakai mock data jika API belum siap
-      if (config.mode === "bsjp") setResults(BSJP_MOCK);
-      else setResults(MOCK_RESULTS);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [config]);
-
-  function handleModeChange(mode: ScreenerConfig["mode"]) {
-    setConfig(c => ({ ...c, mode }));
-    if (mode === "bsjp") setResults(BSJP_MOCK);
-    else setResults(MOCK_RESULTS);
-  }
-
-  function copyAllPlans() {
-    const text = activeResults.map(r => {
-      const plan = r.tradingPlan;
-      const fmt = (n: number) => n?.toLocaleString("id-ID") || "-";
-      return `${r.ticker} | Entry: ${fmt(plan.entryLow)}-${fmt(plan.entryHigh)} | TP1: ${fmt(plan.tp1)} | TP2: ${fmt(plan.tp2)} | CL: ${fmt(plan.cutLoss)} | RR: 1:${plan.rrRatio} | Skor: ${r.score}`;
-    }).join("\n");
-
-    const header = `📋 Trading Plan Harian — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}\nMode: ${config.mode.toUpperCase()}\n${"─".repeat(50)}\n`;
-    navigator.clipboard.writeText(header + text);
-    setCopiedAll(true);
-    setTimeout(() => setCopiedAll(false), 2000);
-  }
-
-  function copyOne(text: string) {
-    navigator.clipboard.writeText(text);
-  }
-
-  const highCount = activeResults.filter(r => r.priority === "HIGH").length;
-  const medCount = activeResults.filter(r => r.priority === "MEDIUM").length;
-
-  return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
       {/* Header */}
-      <div className="border-b border-slate-800 bg-slate-900/95 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <Activity size={16} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-white font-bold text-base leading-tight">Screener & Trading Plan</h1>
-              {lastRun && <p className="text-slate-500 text-xs">Update: {lastRun}</p>}
-            </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: "linear-gradient(135deg, #11998e, #38ef7d)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <TrendingUp size={18} color="white" />
           </div>
-          <div className="flex items-center gap-2">
-            <a href="/screener/signal" className="text-slate-400 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors flex items-center gap-1.5">
-              <TrendingUp size={14} /> Akurasi Sinyal
-            </a>
-            <button
-              onClick={runScreener}
-              disabled={isLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
-              {isLoading ? "Scanning..." : "Run Screener"}
-            </button>
+          <div>
+            <h2 style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--text-primary)", margin: 0, WebkitTextFillColor: "var(--text-primary)", background: "none" }}>Akurasi Sinyal</h2>
+            <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: 0 }}>Dashboard performa historis screener</p>
           </div>
         </div>
+        <a href="/screener" style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "10px", border: "1px solid var(--border-color)", background: "var(--bg-card)", color: "var(--text-secondary)", fontSize: "13px", textDecoration: "none" }}>
+          <Activity size={13} /> Screener
+        </a>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Mode Selector */}
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-          {SIGNAL_MODE_OPTIONS.map(opt => (
-            <button
-              key={opt.id}
-              onClick={() => handleModeChange(opt.id as ScreenerConfig["mode"])}
-              className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all ${
-                config.mode === opt.id
-                  ? "bg-indigo-600/20 border-indigo-500/60 text-indigo-300"
-                  : "bg-slate-800/50 border-slate-700/50 text-slate-400 hover:border-slate-600 hover:text-slate-200"
-              }`}
-            >
-              {opt.icon}
-              <span className="text-xs font-medium leading-tight">{opt.label}</span>
-              {opt.id === "bsjp" && (
-                <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[9px] font-bold px-1 rounded-full">NEW</span>
-              )}
-            </button>
-          ))}
+      {usingMock && (
+        <div style={{ background: "rgba(245,165,35,0.1)", border: "1px solid rgba(245,165,35,0.3)", borderRadius: "10px", padding: "10px 14px", marginBottom: "20px", fontSize: "12px", color: "#f5a623", display: "flex", alignItems: "center", gap: "8px" }}>
+          <AlertTriangle size={13} /> Demo data — akurasi nyata muncul setelah screener berjalan dan D+5 terlewati.
         </div>
+      )}
 
-        {/* Stats Row */}
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: "Total Hasil", value: activeResults.length, color: "text-slate-200" },
-            { label: "HIGH Priority", value: highCount, color: "text-emerald-400" },
-            { label: "MEDIUM Priority", value: medCount, color: "text-amber-400" },
-            { label: "Avg Score", value: activeResults.length ? Math.round(activeResults.reduce((a, b) => a + b.score, 0) / activeResults.length) : 0, color: "text-indigo-400" },
-          ].map((stat, i) => (
-            <div key={i} className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 text-center">
-              <div className={`text-2xl font-bold tabular-nums ${stat.color}`}>{stat.value}</div>
-              <div className="text-slate-500 text-xs mt-0.5">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Controls Row */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              value={searchTicker}
-              onChange={e => setSearchTicker(e.target.value)}
-              placeholder="Cari ticker..."
-              className="w-full pl-9 pr-4 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-            />
+      {/* Overview Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "24px" }}>
+        {[
+          { label: "Sinyal Tracked", value: accuracy.reduce((s, a) => s + (a.tracked_d5 || 0), 0), color: "var(--text-primary)", icon: <Activity size={15} /> },
+          { label: "Avg Hit Rate TP1", value: `${overallHit.toFixed(1)}%`, color: "#38ef7d", icon: <Target size={15} /> },
+          { label: "Avg Return D+5", value: `+${overallRet.toFixed(1)}%`, color: "#a78bfa", icon: <TrendingUp size={15} /> },
+          { label: "Best Mode", value: bestMode ? MODE_LABEL[bestMode.screener_mode]?.split(" ")[0] : "-", color: "#f5a623", icon: <Award size={15} /> },
+        ].map((s, i) => (
+          <div key={i} style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--text-muted)", marginBottom: "8px", fontSize: "12px" }}>{s.icon}{s.label}</div>
+            <div style={{ fontSize: "1.8rem", fontWeight: 700, color: s.color, fontFamily: "monospace" }}>{s.value}</div>
           </div>
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value as typeof sortBy)}
-            className="px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-slate-300 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="score">Sort: Score</option>
-            <option value="changePercent">Sort: % Change</option>
-            <option value="volumeMultiplier">Sort: Volume</option>
-          </select>
-          <button
-            onClick={() => setShowParams(v => !v)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-              showParams ? "bg-indigo-600/20 border-indigo-500/50 text-indigo-300" : "bg-slate-800/50 border-slate-700/50 text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <SlidersHorizontal size={14} />
-            Parameter
-            {showParams ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        ))}
+      </div>
+
+      {/* Mode Filter */}
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "20px" }}>
+        {["all", ...Object.keys(MODE_LABEL)].map(m => (
+          <button key={m} onClick={() => setSelectedMode(m)} style={{ padding: "5px 12px", borderRadius: "20px", border: `1px solid ${selectedMode === m ? "#7c3aed80" : "var(--border-color)"}`, background: selectedMode === m ? "rgba(124,58,237,0.15)" : "var(--bg-card)", color: selectedMode === m ? "#a78bfa" : "var(--text-secondary)", fontSize: "12px", cursor: "pointer" }}>
+            {m === "all" ? "Semua Mode" : MODE_LABEL[m]}
           </button>
-          <button
-            onClick={copyAllPlans}
-            className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
-          >
-            {copiedAll ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-            Copy Semua
-          </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Parameter Panel */}
-        {showParams && (
-          <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-              <SlidersHorizontal size={14} className="text-indigo-400" />
-              Kustomisasi Parameter — Mode: <span className="text-indigo-400">{config.mode.toUpperCase()}</span>
-            </h3>
-            <ParameterPanel config={config} onChange={setConfig} />
-          </div>
-        )}
+      {/* Accuracy Cards */}
+      <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+        <BarChart2 size={13} /> Performa per Mode Screener
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px", marginBottom: "32px" }}>
+        {filtered.map(d => <AccCard key={d.screener_mode} data={d} />)}
+      </div>
 
-        {/* Error banner */}
-        {errorMsg && (
-          <div className="bg-amber-900/20 border border-amber-700/40 rounded-xl p-4 text-amber-300 text-sm">
-            ⚠️ API belum tersambung — menampilkan demo data. Setup Sectors.app API key dulu di environment variables.
-            <br /><span className="text-amber-500/70 text-xs">{errorMsg}</span>
-          </div>
-        )}
-
-        {/* Results Grid */}
-        {activeResults.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {activeResults.map(result => (
-              <TradingPlanCard key={result.ticker} result={result} onCopy={copyOne} />
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-20 text-slate-500">
-            <Activity size={40} className="mx-auto mb-4 opacity-30" />
-            <p className="text-lg">Belum ada hasil</p>
-            <p className="text-sm mt-1">Tekan "Run Screener" untuk mulai scanning</p>
-          </div>
-        )}
+      {/* Top Tickers Table */}
+      <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+        <Award size={13} /> Top Performing Tickers
+      </div>
+      <div style={{ background: "var(--glass-frost), var(--glass-bg)", backdropFilter: "blur(20px)", border: "1px solid var(--glass-border)", borderRadius: "12px", overflow: "hidden", overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+          <thead>
+            <tr style={{ background: "rgba(0,0,0,0.2)" }}>
+              {["#", "Ticker", "Mode", "Muncul", "Hit TP1", "Avg Skor", "Avg Return D+5", "Terakhir"].map((h, i) => (
+                <th key={i} style={thStyle}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tickers.map((t, i) => {
+              const mc = MODE_COLOR[t.screener_mode] || "#667eea";
+              return (
+                <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                  <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: "12px" }}>{i + 1}</td>
+                  <td style={{ padding: "10px 12px", fontFamily: "monospace", fontWeight: 700, color: "var(--text-primary)" }}>{t.ticker}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <span style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "20px", background: `${mc}20`, color: mc, border: `1px solid ${mc}40` }}>
+                      {MODE_LABEL[t.screener_mode]?.split(" ")[0]}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 12px", color: "var(--text-secondary)", fontFamily: "monospace" }}>{t.appearances}×</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ width: "60px", height: "4px", borderRadius: "4px", background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${t.hit_rate_tp1 || 0}%`, background: "#38ef7d", borderRadius: "4px" }} />
+                      </div>
+                      <span style={{ fontSize: "12px", color: "#38ef7d", fontFamily: "monospace", fontWeight: 600 }}>{t.hit_rate_tp1?.toFixed(0)}%</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: "10px 12px", fontFamily: "monospace", color: "#a78bfa" }}>{t.avg_score?.toFixed(0)}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <span style={{ fontFamily: "monospace", fontSize: "12px", color: (t.avg_return_d5 || 0) >= 0 ? "#38ef7d" : "#f5576c", display: "flex", alignItems: "center", gap: "4px" }}>
+                      {(t.avg_return_d5 || 0) >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                      {(t.avg_return_d5 || 0) >= 0 ? "+" : ""}{t.avg_return_d5?.toFixed(1)}%
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 12px", fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <Clock size={10} />{new Date(t.last_appeared).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
