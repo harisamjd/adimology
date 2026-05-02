@@ -8,7 +8,7 @@ import JobStatusIndicator from './JobStatusIndicator';
 import StockbitFetchingIndicator from './StockbitFetchingIndicator';
 import ThemeToggle from './ThemeToggle';
 import PasswordSettingModal from './PasswordSettingModal';
-import { Github, Menu, X, Shield, ScanSearch } from 'lucide-react';
+import { Github, Menu, X, Shield } from 'lucide-react';
 
 const Navbar = () => {
   const pathname = usePathname();
@@ -86,10 +86,10 @@ const Navbar = () => {
               href="/screener"
               style={{
                 textDecoration: 'none',
-                color: pathname?.startsWith('/screener') ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontWeight: pathname?.startsWith('/screener') ? 600 : 400,
+                color: pathname === '/screener' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/screener' ? 600 : 400,
                 fontSize: '0.9rem',
-                borderBottom: pathname?.startsWith('/screener') ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                borderBottom: pathname === '/screener' ? '2px solid var(--accent-primary)' : '2px solid transparent',
                 paddingBottom: '2px',
                 transition: 'all 0.2s',
                 display: 'flex',
@@ -99,6 +99,34 @@ const Navbar = () => {
             >
               <ScanSearch size={15} />
               Screener
+            </Link>
+            <Link
+              href="/screener/plan"
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/screener/plan' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/screener/plan' ? 600 : 400,
+                fontSize: '0.9rem',
+                borderBottom: pathname === '/screener/plan' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s',
+              }}
+            >
+              Trading Plan
+            </Link>
+            <Link
+              href="/screener/signal"
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/screener/signal' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/screener/signal' ? 600 : 400,
+                fontSize: '0.9rem',
+                borderBottom: pathname === '/screener/signal' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s',
+              }}
+            >
+              Akurasi
             </Link>
             <a 
               href="https://github.com/bhaktiutama/adimology" 
@@ -201,8 +229,8 @@ const Navbar = () => {
               onClick={() => setIsMenuOpen(false)}
               style={{
                 textDecoration: 'none',
-                color: pathname?.startsWith('/screener') ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontWeight: pathname?.startsWith('/screener') ? 600 : 400,
+                color: pathname === '/screener' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/screener' ? 600 : 400,
                 fontSize: '1rem',
                 padding: '0.5rem 0',
                 transition: 'all 0.2s',
